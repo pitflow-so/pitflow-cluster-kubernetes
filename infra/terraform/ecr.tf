@@ -7,3 +7,8 @@ resource "aws_ecr_repository" "backend" {
     scan_on_push = true
   }
 }
+
+output "ecr_repository_url" {
+  description = "URL do repositório ECR"
+  value       = aws_ecr_repository.backend.repository_url
+}
