@@ -63,6 +63,20 @@ jobs:
         id: tf-output
         working-directory: infra/terraform
         run: |
+          set -euo pipefail
+          
+          if ! terraform output ecr_repository_url &>/dev/null; then
+            echo "❌ FATAL: Output 'ecr_repository_url' not found in Terraform state"
+            echo "Available outputs:"
+            terraform output
+            exit 1
+          fi
+          
+          if ! terraform output eks_cluster_name &>/dev/null; then
+            echo "❌ FATAL: Output 'eks_cluster_name' not found in Terraform state"
+            exit 1
+          fi
+
           echo "ecr_url=$(terraform output -raw ecr_repository_url)" >> $GITHUB_OUTPUT
           echo "eks_cluster_name=$(terraform output -raw eks_cluster_name)" >> $GITHUB_OUTPUT
 
@@ -103,6 +117,13 @@ jobs:
           ECR_URL="${{ needs.infrastructure.outputs.ecr_url }}"
           EKS_CLUSTER_NAME="${{ needs.infrastructure.outputs.eks_cluster_name }}"
 
+          if [ -z "$ECR_URL" ] || [ -z "$EKS_CLUSTER_NAME" ]; then
+            echo "❌ FATAL: ECR_URL or EKS_CLUSTER_NAME is empty"
+            echo "ECR_URL: $ECR_URL"
+            echo "EKS_CLUSTER_NAME: $EKS_CLUSTER_NAME"
+            exit 1
+          fi
+          
           echo "Updating ECR URL and EKS Cluster name ..."
 
           CURRENT_SECRET=$(aws secretsmanager get-secret-value \
@@ -112,9 +133,8 @@ jobs:
 
           UPDATED_SECRET=$(echo "$CURRENT_SECRET" | \
             jq --arg ecr_url "$ECR_URL" \
-            --arg eks_cluster_name "$EKS_CLUSTER_NAME" \
-            '.ecr_url = $ecr_url | \
-            .eks_cluster_name = $eks_cluster_name')
+              --arg eks_cluster_name "$EKS_CLUSTER_NAME" \
+              '.ecr_url = $ecr_url | .eks_cluster_name = $eks_cluster_name')
 
           aws secretsmanager update-secret \
             --secret-id "$SECRET_ID" \
