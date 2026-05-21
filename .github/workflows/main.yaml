@@ -1,0 +1,123 @@
+name: Pitflow EKS and ECR CI/CD
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  infrastructure:
+    name: Provision EKS Cluster and ECR infrastructure
+    runs-on: ubuntu-latest
+    outputs:
+      ecr_url: ${{ steps.tf-output.outputs.ecr_url }}
+      eks_cluster_name: ${{ steps.tf-output.outputs.eks_cluster_name }}
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+            aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+            aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+            aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+            aws-region: us-east-1
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Cache Terraform state
+        uses: actions/cache@v3
+        with:
+            path: infra/terraform/.terraform
+            key: terraform-${{ runner.os }}-${{ hashFiles('infra/terraform/.terraform.lock.hcl') }}
+            restore-keys: |
+              terraform-${{ runner.os }}-
+      
+      - name: Terraform Setup
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init
+        working-directory: infra/terraform
+        run: terraform init
+      
+      - name: Terraform Format Check
+        working-directory: infra/terraform
+        run: terraform fmt -check
+
+      - name: Terraform Validate
+        working-directory: infra/terraform
+        run: terraform validate
+
+      - name: Terraform Plan
+        working-directory: infra/terraform
+        run: terraform plan -out=main.tfplan
+
+      - name: Terraform Apply
+        working-directory: infra/terraform
+        run: terraform apply -auto-approve main.tfplan
+    
+      - name: Capture Terraform Outputs
+        id: tf-output
+        working-directory: infra/terraform
+        run: |
+          echo "ecr_url=$(terraform output -raw ecr_repository_url)" >> $GITHUB_OUTPUT
+          echo "eks_cluster_name=$(terraform output -raw eks_cluster_name)" >> $GITHUB_OUTPUT
+
+  update-ecr-url-and-cluster-name:
+    name: Update ECR URL and EKS Cluster Name in Secrets Manager
+    needs: infrastructure
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: us-east-1
+     
+      - name: Install jq
+        run: sudo apt-get install -y jq
+
+      - name: Validate Secret Existence
+        run: |
+          SECRET_ID="pitflow/bootstrap"
+
+          echo "Validating secret: $SECRET_ID"
+          
+          if ! aws secretsmanager describe-secret --secret-id "$SECRET_ID" &> /dev/null; then
+            echo "❌ FATAL: Secret '$SECRET_ID' not found in AWS Secrets Manager"
+            exit 1
+          fi
+          
+          echo "✅ Secret exists"
+
+      - name: Update Secrets Manager with ECR URL and EKS Cluster Name
+        run: |
+          set -eo pipefail
+
+          SECRET_ID="pitflow/bootstrap"
+          ECR_URL="${{ needs.infrastructure.outputs.ecr_url }}"
+          EKS_CLUSTER_NAME="${{ needs.infrastructure.outputs.eks_cluster_name }}"
+
+          echo "Updating ECR URL and EKS Cluster name ..."
+
+          CURRENT_SECRET=$(aws secretsmanager get-secret-value \
+            --secret-id "$SECRET_ID" \
+            --query 'SecretString' \
+            --output text)
+
+          UPDATED_SECRET=$(echo "$CURRENT_SECRET" | \
+            jq --arg ecr_url "$ECR_URL" \
+            --arg eks_cluster_name "$EKS_CLUSTER_NAME" \
+            '.ecr_url = $ecr_url | \
+            .eks_cluster_name = $eks_cluster_name')
+
+          aws secretsmanager update-secret \
+            --secret-id "$SECRET_ID" \
+            --secret-string "$UPDATED_SECRET" > /dev/null
+        
+          echo "✅ Secrets Manager updated successfully"
