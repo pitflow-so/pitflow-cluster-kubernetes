@@ -22,7 +22,7 @@ resource "aws_eks_node_group" "pitflow_nodes" {
   }
 
   tags = {
-    "k8s.io/cluster-autoscaler/enabled" = "true"
+    "k8s.io/cluster-autoscaler/enabled"     = "true"
     "k8s.io/cluster-autoscaler/pitflow-eks" = "owned"
   }
 
