@@ -1,12 +1,12 @@
 resource "helm_release" "cluster_autoscaler" {
   provider = helm.eks
 
-  name       = "cluster-autoscaler"
-  namespace  = "kube-system"
+  name      = "cluster-autoscaler"
+  namespace = "kube-system"
 
   repository = "https://kubernetes.github.io/autoscaler"
   chart      = "cluster-autoscaler"
-  version = "9.29.0"
+  version    = "9.29.0"
 
   depends_on = [
     null_resource.wait_for_eks,
@@ -24,9 +24,9 @@ resource "helm_release" "cluster_autoscaler" {
       }
       fullnameOverride = "cluster-autoscaler-pitflow"
       extraArgs = {
-        balance-similar-node-groups  = true
-        scale-down-unneeded-time     = "5m"
-        v                            = 4
+        balance-similar-node-groups = true
+        scale-down-unneeded-time    = "5m"
+        v                           = 4
       }
     })
   ]
