@@ -133,8 +133,8 @@ jobs:
 
           UPDATED_SECRET=$(echo "$CURRENT_SECRET" | \
             jq --arg ECR_URL "$ECR_URL" \
-              --arg EKS_CLUSTER_NAME "$EKS_CLUSTER_NAME" \
-              '.ecr_url = $ECR_URL | .eks_cluster_name = $EKS_CLUSTER_NAME')
+               --arg EKS_CLUSTER_NAME "$EKS_CLUSTER_NAME" \
+               '.ECR_URL = $ECR_URL | .EKS_CLUSTER_NAME = $EKS_CLUSTER_NAME')
 
           aws secretsmanager update-secret \
             --secret-id "$SECRET_ID" \
