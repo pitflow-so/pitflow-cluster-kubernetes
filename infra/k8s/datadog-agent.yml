@@ -21,10 +21,6 @@ spec:
     apm:
       instrumentation:
         enabled: true
-        targets:
-          - name: "default-target"
-            ddTraceVersions:
-              java: "1"
     logCollection:
       enabled: true
       containerCollectAll: true
