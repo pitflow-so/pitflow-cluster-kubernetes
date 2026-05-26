@@ -79,6 +79,16 @@ jobs:
 
           echo "ecr_url=$(terraform output -raw ecr_repository_url)" >> $GITHUB_OUTPUT
           echo "eks_cluster_name=$(terraform output -raw eks_cluster_name)" >> $GITHUB_OUTPUT
+      
+      - name: Update Kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --name ${{ steps.tf-output.outputs.eks_cluster_name }} \
+            --region us-east-1
+      
+      - name: Deploy Datadog Agent to EKS
+        run: |
+          kubectl apply -f infra/k8s/datadog-agent.yml -n datadog
 
   update-ecr-url-and-cluster-name:
     name: Update ECR URL and EKS Cluster Name in Secrets Manager
