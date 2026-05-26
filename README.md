@@ -7,6 +7,7 @@ Este repositório provisiona a infraestrutura AWS necessária para o projeto Pit
 - Um cluster Kubernetes gerenciado com Amazon EKS.
 - Um repositório de container registry com Amazon ECR para armazenar a imagem do backend do `pitflow-os`.
 - Um workflow GitHub Actions que automatiza a aplicação do Terraform e atualiza os dados no AWS Secrets Manager.
+- Configura o agente do Datadog.
 
 > O repositório não cria a imagem do backend nem faz o deploy da aplicação no cluster; ele entrega a infraestrutura de base para esses próximos passos.
 
@@ -34,6 +35,7 @@ Este repositório provisiona a infraestrutura AWS necessária para o projeto Pit
 ```mermaid
 flowchart LR
   GH[GitHub Actions] -->|checkout + terraform apply| Terraform[Terraform]
+  GH[[GitHub Actions]] -->| Deploy DataDog agent| Kubernetes[Kubernetes API]
   Terraform -->|create| EKS[EKS Cluster]
   Terraform -->|create| ECR[ECR Repository]
   Terraform -->|create| NodeGroup[Node Group]
@@ -100,6 +102,7 @@ Ele realiza:
 - Configuração de credenciais AWS usando secrets.
 - Inicialização e validação do Terraform.
 - Aplicação do plano Terraform.
+- Realiza deploy do agente do DataDog.
 - Captura do URL do repositório ECR e do nome do cluster EKS.
 - Atualização do segredo `pitflow/bootstrap` no AWS Secrets Manager.
 
