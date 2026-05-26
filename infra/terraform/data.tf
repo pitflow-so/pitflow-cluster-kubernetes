@@ -27,6 +27,7 @@ data "aws_eks_cluster_auth" "cluster" {
   name = aws_eks_cluster.pitflow_cluster.name
 }
 
+
 data "aws_secretsmanager_secret" "pitflow" {
   name = var.secret_name
 }
