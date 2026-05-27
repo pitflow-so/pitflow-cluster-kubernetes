@@ -22,6 +22,12 @@ resource "helm_release" "cluster_autoscaler" {
       rbac = {
         create = true
       }
+      # --- solução provisoria para o erro de CrashLoopBackOff gerado por falta de CREDENCIAIS  ---
+      hostNetwork = true
+      extraEnv = {
+        AWS_REGION = "us-east-1"
+      }
+      # ----------------------------------------
       fullnameOverride = "cluster-autoscaler-pitflow"
       extraArgs = {
         balance-similar-node-groups = true
