@@ -20,14 +20,15 @@ resource "aws_eks_node_group" "pitflow_nodes" {
     max_size     = 3
     min_size     = 1
   }
-
+  
   tags = {
     "k8s.io/cluster-autoscaler/enabled"     = "true"
-    "k8s.io/cluster-autoscaler/pitflow-eks" = "owned"
+    "k8s.io/cluster-autoscaler/${var.eks_cluster_name}" = "owned"
   }
 
   instance_types = ["t3.medium"]
   capacity_type  = "SPOT"
+  #capacity_type  = "ON_DEMAND"
 }
 
 output "eks_cluster_name" {
