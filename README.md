@@ -68,7 +68,7 @@ cd pitflow-cluster-kubernetes/infra/terraform
 ```
 
 2. Inicialize o Terraform, 
-- OBS: caso for utilizar `tfstate` local, comentar o conteúdo de [backend.tf](infra/terraform/backend.tf), caso contrário é necessário ter o S3: `tfstate-backend-fiap-pitflow`
+- OBS: caso for utilizar `tfstate` local, comentar o conteúdo de [backend.tf](infra/terraform/backend.tf), caso contrário é necessário ter o S3: `tfstate-backend-pitflow-bootstrap`
 
 ```bash
 terraform init
@@ -110,5 +110,5 @@ Ele realiza:
 
 - O cluster EKS usa sub-redes do VPC padrão de `us-east-1` e exclui `us-east-1e` explicitamente no filtro de subnets.
 - O grupo de nós EKS usa instâncias `SPOT`; os custos e disponibilidade podem variar.
-- O backend de estado do Terraform é armazenado em um bucket S3 existente: `tfstate-backend-fiap-pitflow`.
+- O backend de estado do Terraform é armazenado em um bucket S3 existente: `tfstate-backend-pitflow-bootstrap`.
 
