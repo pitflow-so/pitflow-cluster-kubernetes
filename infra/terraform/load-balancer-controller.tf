@@ -45,6 +45,7 @@ resource "kubernetes_ingress_v1" "pitflow_edge" {
         }
       })
       "alb.ingress.kubernetes.io/group.name"   = "pitflow"
+      "alb.ingress.kubernetes.io/group.order"  = "1000"
       "alb.ingress.kubernetes.io/listen-ports" = jsonencode([{ HTTP = 80 }])
       "alb.ingress.kubernetes.io/scheme"       = "internet-facing"
       "alb.ingress.kubernetes.io/subnets"      = join(",", data.aws_subnets.default.ids)
