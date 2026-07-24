@@ -1,4 +1,4 @@
-name: Pitflow EKS and ECR CI/CD
+name: Pitflow Shared Platform CI/CD
 
 on:
   push:
@@ -9,13 +9,22 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  SECRET_ID: pitflow/bootstrap
+
 jobs:
   infrastructure:
-    name: Provision EKS Cluster and ECR infrastructure
+    name: Provision shared AWS and Kubernetes platform
     runs-on: ubuntu-latest
     outputs:
       ecr_url: ${{ steps.tf-output.outputs.ecr_url }}
       eks_cluster_name: ${{ steps.tf-output.outputs.eks_cluster_name }}
+      lb_url: ${{ steps.load-balancer.outputs.lb_url }}
+      api_public_url: ${{ steps.tf-output.outputs.api_public_url }}
     steps:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -23,7 +32,7 @@ jobs:
             aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
             aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
             aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
-            aws-region: us-east-1
+            aws-region: ${{ env.AWS_REGION }}
 
       - name: Checkout code
         uses: actions/checkout@v4
@@ -50,6 +59,12 @@ jobs:
       - name: Terraform Validate
         working-directory: infra/terraform
         run: terraform validate
+
+      - name: Validate Lambda prerequisites
+        run: |
+          set -euo pipefail
+          aws lambda get-function --function-name pitflow-auth >/dev/null
+          aws lambda get-function --function-name pitflow-budget-form >/dev/null
 
       - name: Terraform Plan
         working-directory: infra/terraform
@@ -79,6 +94,7 @@ jobs:
 
           echo "ecr_url=$(terraform output -raw ecr_repository_url)" >> $GITHUB_OUTPUT
           echo "eks_cluster_name=$(terraform output -raw eks_cluster_name)" >> $GITHUB_OUTPUT
+          echo "api_public_url=$(terraform output -raw api_gateway_endpoint)" >> $GITHUB_OUTPUT
       
       - name: Update Kubeconfig
         run: |
@@ -90,8 +106,69 @@ jobs:
         run: |
           kubectl apply -f infra/k8s/datadog-agent.yml -n datadog
 
+      - name: Wait for shared Application Load Balancer
+        id: load-balancer
+        run: |
+          set -euo pipefail
+
+          echo "Waiting for AWS Load Balancer Controller to publish the ALB hostname..."
+
+          LB_HOSTNAME=""
+          for attempt in $(seq 1 60); do
+            LB_HOSTNAME="$(kubectl get ingress pitflow-edge \
+              --namespace default \
+              --output jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)"
+
+            if [ -n "$LB_HOSTNAME" ]; then
+              break
+            fi
+
+            echo "Attempt ${attempt}/60: ALB hostname is not available yet."
+            sleep 10
+          done
+
+          if [ -z "$LB_HOSTNAME" ]; then
+            echo "The shared ALB hostname was not published within 10 minutes." >&2
+            kubectl describe ingress pitflow-edge --namespace default || true
+            exit 1
+          fi
+
+          LB_URL="http://${LB_HOSTNAME}"
+          echo "lb_url=${LB_URL}" >> "$GITHUB_OUTPUT"
+          echo "Shared ALB available at ${LB_URL}"
+
+      - name: Publish ALB URL before API Gateway reconciliation
+        env:
+          LB_URL: ${{ steps.load-balancer.outputs.lb_url }}
+        run: |
+          set -euo pipefail
+
+          current_secret="$RUNNER_TEMP/pitflow-secret-current.json"
+          updated_secret="$RUNNER_TEMP/pitflow-secret-updated.json"
+          trap 'rm -f "$current_secret" "$updated_secret"' EXIT
+
+          aws secretsmanager get-secret-value \
+            --secret-id "$SECRET_ID" \
+            --query SecretString \
+            --output text > "$current_secret"
+
+          jq --arg url "$LB_URL" \
+            '.LB_URL = $url' \
+            "$current_secret" > "$updated_secret"
+
+          aws secretsmanager put-secret-value \
+            --secret-id "$SECRET_ID" \
+            --secret-string "file://$updated_secret" >/dev/null
+
+      - name: Reconcile API Gateway with the real ALB URL
+        working-directory: infra/terraform
+        run: |
+          set -euo pipefail
+          terraform plan -out=reconcile.tfplan
+          terraform apply -auto-approve reconcile.tfplan
+
   update-ecr-url-and-cluster-name:
-    name: Update ECR URL and EKS Cluster Name in Secrets Manager
+    name: Update platform values in Secrets Manager
     needs: infrastructure
     runs-on: ubuntu-latest
     steps:
@@ -101,15 +178,13 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
-          aws-region: us-east-1
+          aws-region: ${{ env.AWS_REGION }}
      
       - name: Install jq
         run: sudo apt-get install -y jq
 
       - name: Validate Secret Existence
         run: |
-          SECRET_ID="pitflow/bootstrap"
-
           echo "Validating secret: $SECRET_ID"
           
           if ! aws secretsmanager describe-secret --secret-id "$SECRET_ID" &> /dev/null; then
@@ -119,18 +194,17 @@ jobs:
           
           echo "✅ Secret exists"
 
-      - name: Update Secrets Manager with ECR URL and EKS Cluster Name
+      - name: Update Secrets Manager with ECR, EKS and ALB values
         run: |
-          set -eo pipefail
+          set -euo pipefail
 
-          SECRET_ID="pitflow/bootstrap"
           ECR_URL="${{ needs.infrastructure.outputs.ecr_url }}"
           EKS_CLUSTER_NAME="${{ needs.infrastructure.outputs.eks_cluster_name }}"
+          LB_URL="${{ needs.infrastructure.outputs.lb_url }}"
+          API_PUBLIC_URL="${{ needs.infrastructure.outputs.api_public_url }}"
 
-          if [ -z "$ECR_URL" ] || [ -z "$EKS_CLUSTER_NAME" ]; then
-            echo "❌ FATAL: ECR_URL or EKS_CLUSTER_NAME is empty"
-            echo "ECR_URL: $ECR_URL"
-            echo "EKS_CLUSTER_NAME: $EKS_CLUSTER_NAME"
+          if [ -z "$ECR_URL" ] || [ -z "$EKS_CLUSTER_NAME" ] || [ -z "$LB_URL" ] || [ -z "$API_PUBLIC_URL" ]; then
+            echo "ECR_URL, EKS_CLUSTER_NAME, LB_URL and API_PUBLIC_URL must all be populated." >&2
             exit 1
           fi
           
@@ -144,7 +218,12 @@ jobs:
           UPDATED_SECRET=$(echo "$CURRENT_SECRET" | \
             jq --arg ECR_URL "$ECR_URL" \
                --arg EKS_CLUSTER_NAME "$EKS_CLUSTER_NAME" \
-               '.ECR_URL = $ECR_URL | .EKS_CLUSTER_NAME = $EKS_CLUSTER_NAME')
+               --arg LB_URL "$LB_URL" \
+               --arg API_PUBLIC_URL "$API_PUBLIC_URL" \
+               '.ECR_URL = $ECR_URL |
+                .EKS_CLUSTER_NAME = $EKS_CLUSTER_NAME |
+                .LB_URL = $LB_URL |
+                .API_PUBLIC_URL = $API_PUBLIC_URL')
 
           aws secretsmanager update-secret \
             --secret-id "$SECRET_ID" \

@@ -35,3 +35,11 @@ data "aws_secretsmanager_secret" "pitflow" {
 data "aws_secretsmanager_secret_version" "pitflow" {
   secret_id = data.aws_secretsmanager_secret.pitflow.id
 }
+
+data "aws_lambda_function" "auth" {
+  function_name = var.auth_lambda_name
+}
+
+data "aws_lambda_function" "budget_form" {
+  function_name = var.budget_form_lambda_name
+}
